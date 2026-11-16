@@ -7,25 +7,7 @@ const path = require('node:path');
 
 const deviceStates = new Set(['device', 'offline', 'unauthorized', 'authorizing', 'connecting', 'recovery', 'sideload', 'bootloader', 'no']);
 const audioModes = new Set(['off', 'output', 'mic']);
-const resolutions = new Set([720, 1080, 1440, 0]);
-
-const controls = new Map([
-  ['back', ['input', 'keyevent', 'KEYCODE_BACK']],
-  ['home', ['input', 'keyevent', 'KEYCODE_HOME']],
-  ['recents', ['input', 'keyevent', 'KEYCODE_APP_SWITCH']],
-  ['power', ['input', 'keyevent', 'KEYCODE_POWER']],
-  ['wake', ['input', 'keyevent', 'KEYCODE_WAKEUP']],
-  ['volumeUp', ['input', 'keyevent', 'KEYCODE_VOLUME_UP']],
-  ['volumeDown', ['input', 'keyevent', 'KEYCODE_VOLUME_DOWN']],
-  ['mute', ['input', 'keyevent', 'KEYCODE_VOLUME_MUTE']],
-  ['notifications', ['cmd', 'statusbar', 'expand-notifications']],
-  ['quickSettings', ['cmd', 'statusbar', 'expand-settings']],
-  ['accessibility', ['am', 'start', '-a', 'android.settings.ACCESSIBILITY_SETTINGS']],
-  ['cast', ['am', 'start', '-a', 'android.settings.CAST_SETTINGS']],
-  ['location', ['am', 'start', '-a', 'android.settings.LOCATION_SOURCE_SETTINGS']],
-  ['developer', ['am', 'start', '-a', 'android.settings.APPLICATION_DEVELOPMENT_SETTINGS']],
-  ['about', ['am', 'start', '-a', 'android.settings.DEVICE_INFO_SETTINGS']],
-]);
+const { normalizePreferences } = require('./preferences.cjs');
 
 function readDevices(output) {
   const lines = output.split(/\r?\n/);
@@ -113,7 +95,7 @@ function findTools(resources) {
   }
   const adb = firstExecutable('adb', [...base, bundled, developmentBundle, gui], process.env.ADB);
   const scrcpy = firstExecutable('scrcpy', [bundled, developmentBundle, ...base, gui], process.env.SCRCPY);
-  if (!adb || !scrcpy) throw new Error('Android Mirror could not find ADB and scrcpy. Re-extract the full app or install both tools.');
+  if (!adb || !scrcpy) throw new Error('OmniCast could not find ADB and scrcpy. Re-extract the full app or install both tools.');
   const server = path.join(path.dirname(scrcpy), 'scrcpy-server');
   const env = { ...process.env, ADB: adb };
   try { accessSync(server, constants.R_OK); env.SCRCPY_SERVER_PATH = server; } catch { /* System scrcpy knows its server path. */ }
@@ -140,13 +122,35 @@ function run(file, args, { env, input, timeout = 6_000 } = {}) {
 
 function mirrorArgs(serial, title, options) {
   const audio = audioModes.has(options.audio) ? options.audio : 'off';
-  const size = resolutions.has(Number(options.size)) ? Number(options.size) : 1440;
+  const settings = normalizePreferences(options);
   const args = ['--serial', serial, '--window-title=' + title];
-  if (size) args.push('--max-size=' + size);
   if (audio === 'off') args.push('--no-audio');
   else args.push('--audio-source=' + audio);
-  if (options.keyboard === 'physical') args.push('--keyboard=uhid');
+  if (!options.audioOnly) {
+    if (settings.size !== '0') args.push('--max-size=' + settings.size);
+    if (settings.fps !== '0') args.push('--max-fps=' + settings.fps);
+    args.push('--video-codec=' + settings.codec, '--video-bit-rate=' + settings.bitRate + 'M');
+    const backends = { darwin: 'videotoolbox', win32: 'd3d11va', linux: 'vaapi' };
+    if (settings.decoder === 'software' || options.webcam) args.push('--hwdec=disabled');
+    else if (settings.decoder === 'hardware' && backends[process.platform]) args.push('--hwdec=' + backends[process.platform]);
+    if (settings.fullscreen) args.push('--fullscreen');
+    if (options.virtualDisplay) {
+      args.push('--new-display=' + options.virtualDisplay);
+      if (options.flex) args.push('--flex-display');
+      if (options.startApp) args.push('--start-app=' + options.startApp);
+    }
+    if (options.webcam) args.push('--v4l2-sink=' + options.webcam);
+  }
   if (options.viewOnly) args.push('--no-control');
+  else {
+    if (settings.keyboard === 'physical') args.push('--keyboard=uhid');
+    if (settings.mouse === 'physical') args.push('--mouse=uhid');
+    if (settings.gamepad) args.push('--gamepad=uhid');
+    if (!settings.clipboard) args.push('--no-clipboard-autosync');
+    if (settings.keepActive) args.push('--keep-active');
+    if (!options.virtualDisplay && settings.screenOff) args.push('--turn-screen-off');
+    if (!options.virtualDisplay && settings.showTouches) args.push('--show-touches');
+  }
   if (options.record) {
     args.push('--record=' + options.record);
     if (audio !== 'off') args.push('--audio-codec=aac');
@@ -156,4 +160,4 @@ function mirrorArgs(serial, title, options) {
   return args;
 }
 
-module.exports = { controls, findTools, groupDevices, identityFor, mirrorArgs, readDevices, run, validateAddress };
+module.exports = { findTools, groupDevices, identityFor, mirrorArgs, readDevices, run, validateAddress };

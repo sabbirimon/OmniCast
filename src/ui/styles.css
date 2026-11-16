@@ -26,3 +26,77 @@ dialog{padding:21px;width:min(440px,calc(100vw - 40px));border:1px solid #405b63
 @media(prefers-reduced-motion:no-preference){button{transition:background-color .15s,border-color .15s,opacity .15s}}
 .topbar{position:sticky;top:0;z-index:2}.options label.checkbox,dialog label.checkbox{display:flex;gap:7px}
 .product-photo{width:28px;height:41px;object-fit:contain;flex:0 0 auto}.product-photo.large{width:57px;height:82px}.brand-logo{width:60px;height:auto;background:#f8fbfb;border-radius:4px;padding:3px 5px;display:inline-block;margin-bottom:5px}.brand-label{font-size:11px;color:var(--muted);display:inline-block;margin-bottom:5px}.photo-actions{margin-top:8px;gap:14px}
+
+.brand-mark{width:38px;height:38px;background:none;border:0;object-fit:contain}
+.empty-mark{width:66px;height:66px;background:none}
+.topbar{grid-template-columns:auto 1fr auto}
+.tabs{justify-content:center;flex-wrap:wrap}
+.guide-phone{
+  display:grid;gap:3px;margin:11px auto 9px;width:min(190px,100%);
+  background:#101d26;border:2px solid #55727d;border-bottom-width:5px;
+  border-radius:15px;padding:10px;color:var(--text);font-size:11px
+}
+.guide-phone b{padding:3px 6px 5px;font-size:13px}
+.guide-phone span{padding:5px 6px;border-radius:5px}
+.guide-phone em{float:right;font-style:normal;color:var(--mint);font-weight:650}
+.illustration-focus,.illustration-dialog{background:#254b44;color:var(--mint)}
+.illustration-dialog{background:#2e4350;color:var(--text)}
+.guide-wide{width:min(270px,100%);margin:12px 0}
+.wide-dialog{width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 30px)}
+.controls-library,.settings-grid,.wireless-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.controls-library fieldset{min-width:0;border:1px solid var(--line);border-radius:9px;padding:6px 10px 10px}
+.controls-library legend{font-weight:680;padding:0 5px}
+.controls-library .checkbox,.settings-grid .checkbox{margin:6px 0}
+.controls-library .checkbox span{color:var(--mint);min-width:18px;text-align:center}
+.settings-grid p{margin-top:8px}.settings-grid .options label,.search-label{color:var(--muted)}
+.wireless-grid{margin:13px 0}.qr-card{grid-column:1 / -1}.qr-card p{margin:6px 0 9px}
+#qr-display,#qr-video{display:block;width:min(230px,100%);margin:12px 0 1px;border-radius:8px}
+#qr-video{width:min(350px,100%);background:#0c151c}
+#qr-stop{margin-left:4px}#wifi-status{min-height:1.55em}
+.wifi-service{display:flex;justify-content:space-between;align-items:center;gap:7px;padding:7px 0;border-bottom:1px solid var(--line)}
+.wifi-service:last-child{border:0}.wifi-service strong{overflow-wrap:anywhere;font-size:12px}
+.terminal-card,.adb-actions{margin-bottom:12px}
+#terminal{height:clamp(230px,42vh,450px);padding:11px;background:#0c151c;border:1px solid #304650;border-radius:10px;overflow:hidden}
+#terminal-status,.adb-actions p{margin-top:9px}
+.command-output{white-space:pre-wrap;overflow:auto;max-height:310px;margin:10px 0 0;padding:10px;border-radius:8px;background:#0c151c;color:#dce9ed;font:12px/1.5 monospace;user-select:text}
+.command-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:11px 0}
+.command-list article{min-width:0;padding:10px;border:1px solid var(--line);border-radius:8px}
+.command-list code{display:block;overflow-wrap:anywhere;color:var(--text);margin:4px 0;font-size:12px;user-select:all}
+.command-group{font-size:11px;color:var(--mint)}
+.search-label{display:grid;gap:6px;margin:11px 0;font-size:12px}
+.adb-help summary,#advanced-capture summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:650}
+#advanced-capture{margin-top:12px}
+.device-tools{margin-top:10px}
+@media(max-width:810px){
+  .topbar{height:auto;min-height:68px;padding-block:7px}
+  .tabs .tab{padding:7px 8px}
+}
+
+body{grid-template-rows:auto 1fr auto auto}
+#android-nav{
+  position:sticky;bottom:0;z-index:1;display:flex;justify-content:center;
+  align-items:center;gap:clamp(33px,8vw,120px);background:#0b1218;
+  border-block:1px solid var(--line);padding:2px 14px
+}
+#android-nav button{display:grid;place-items:center;width:64px;height:38px;background:none;border:0;border-radius:8px;color:#dce9ed}
+#android-nav button:hover{background:#233741;color:#a7f3d8}
+.nav-back{width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;border-right:13px solid currentColor}
+.nav-home{width:15px;height:15px;border-radius:50%;background:currentColor}
+.nav-recents{width:14px;height:14px;border-radius:2px;background:currentColor}
+.pad button[aria-pressed=true],button[data-key][aria-pressed=true]{background:#285547;border-color:#78c9ad;color:#ecfff8}
+.pad button[aria-pressed=true] small{color:#b9ffe4}
+.shortcut-group{margin:11px 0 5px;color:var(--muted);font-size:12px}
+.virtual-keys{display:grid;gap:6px}.virtual-keys>div{display:flex;justify-content:center;gap:6px}
+.virtual-keys .button{padding:5px 10px;min-width:32px;min-height:36px}
+.dial-keys .button{flex:0 1 65px}
+@media(max-width:800px){.virtual-keys .button{padding-inline:6px}}
+
+.brand-logo.manufacturer{width:30px;height:24px;padding:2px 5px;object-fit:contain}
+.active-mirrors{display:grid;gap:7px;margin-top:3px}
+.active-mirrors h2{font-size:13px}
+#active-mirror-list{display:grid;gap:6px}
+.session-row{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:6px 6px 6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.session-row .link{display:grid;gap:3px;overflow:hidden}
+.session-row .link strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-row span{font-size:11px;color:var(--muted)}
+.session-row .icon-button{width:29px;height:29px;flex:0 0 auto}

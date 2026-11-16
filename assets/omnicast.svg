@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <title>OmniCast</title>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#234a76"/>
+      <stop offset="1" stop-color="#101f3a"/>
+    </linearGradient>
+    <linearGradient id="edge" x2="0" y2="1">
+      <stop stop-color="#6486af"/>
+      <stop offset="1" stop-color="#253b60"/>
+    </linearGradient>
+  </defs>
+  <rect x="6.5" y="6.5" width="115" height="115" rx="27.5" fill="url(#background)" stroke="url(#edge)"/>
+  <path d="M68 75H35a8 8 0 0 1-8-8V42a8 8 0 0 1 8-8h48a8 8 0 0 1 8 8v8M39 88h27" fill="none" stroke="#f3f8ff" stroke-width="8" stroke-linecap="round"/>
+  <rect x="77" y="59" width="25" height="42" rx="7" fill="#17324b" stroke="#5fe4dc" stroke-width="7"/>
+  <path d="M87 92h5" stroke="#91f0e8" stroke-width="3" stroke-linecap="round"/>
+  <path d="m50 47 12 8-12 8z" fill="#f3f8ff"/>
+  <rect x="96" y="28" width="6" height="6" rx="2" fill="#91f0e8"/>
+  <rect x="103" y="38" width="5" height="5" rx="1.5" fill="#5fe4dc"/>
+</svg>

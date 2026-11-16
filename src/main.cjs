@@ -1,22 +1,41 @@
 'use strict';
 
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, shell } = require('electron');
-const { spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { controls, findTools, groupDevices, identityFor, mirrorArgs, readDevices, run, validateAddress } = require('./devices.cjs');
+const { findTools, groupDevices, identityFor, mirrorArgs, readDevices, run, validateAddress } = require('./devices.cjs');
+const { controls, controlLibrary } = require('./controls.cjs');
+const { defaults, normalizePreferences } = require('./preferences.cjs');
+const { actions, createTerminal } = require('./terminal.cjs');
+const { parseServices, qrCredentials, readAdbQR } = require('./wireless.cjs');
 const { createMeter } = require('./meter.cjs');
-const { profile } = require('./catalog.cjs');
+const { logo, profile } = require('./catalog.cjs');
 
 app.setName('OmniCast');
 protocol.registerSchemesAsPrivileged([{ scheme: 'omnicast', privileges: { standard: true, secure: true } }]);
 const page = 'omnicast://app/index.html';
-const assets = new Set(['/index.html', '/styles.css', '/renderer.js', '/inter.woff2', '/sharp-mark.png']);
+const vendors = new Map([
+  ['/xterm.js', require.resolve('@xterm/xterm')],
+  ['/xterm.css', require.resolve('@xterm/xterm/css/xterm.css')],
+  ['/fit.js', require.resolve('@xterm/addon-fit')],
+  ['/jsqr.js', require.resolve('jsqr')],
+  ['/qrcode.js', require.resolve('qrcode-generator')],
+]);
+const assets = new Set(['/index.html', '/styles.css', '/renderer.js', '/inter.woff2', '/sharp-mark.png', '/omnicast.png', '/adb-tools.js', '/adb-help.js', '/wireless-ui.js']);
 let window;
 let tools;
 let stateFile;
+let settingsFile;
+let settings = { ...defaults };
+let otg;
+let pairingPromise;
+const terminal = createTerminal({
+  getTools,
+  send(data) { if (window && !window.isDestroyed()) window.webContents.send('terminal-data', data); },
+});
 let logFile;
 let saved = [];
 let detected = [];
@@ -29,7 +48,9 @@ const sessions = new Map();
 const identityCache = new Map();
 const autoAttempts = new Set();
 const recoveries = new Map();
+const knownWireless = new Map();
 const events = [];
+const photoAttempts = new Set();
 let knownLinks = new Map();
 
 function writeSaved(next) {
@@ -65,7 +86,7 @@ function photoPath(filename) {
   return path.join(app.getPath('userData'), 'photos', filename);
 }
 
-async function setPhoto(key, useCatalog) {
+async function setPhoto(key, useCatalog, automatic = false) {
   const phone = groupDevices(connections, saved).find((device) => device.key === key);
   if (!phone) throw new Error('Select a phone first.');
   let data;
@@ -100,17 +121,32 @@ async function setPhoto(key, useCatalog) {
   if (image.isEmpty()) throw new Error('OmniCast could not read that photo.');
   const filename = photoPath(photoKey(phone.model));
   fs.mkdirSync(path.dirname(filename), { recursive: true });
-  fs.writeFileSync(filename, image.resize({ width: 320, quality: 'good' }).toPNG(), { mode: 0o600 });
+  try {
+    fs.writeFileSync(filename, image.resize({ width: 320, quality: 'good' }).toPNG(),
+      { mode: 0o600, flag: automatic ? 'wx' : 'w' });
+  } catch (error) {
+    if (automatic && error.code === 'EEXIST') return;
+    throw error;
+  }
   publish();
+}
+
+function loadCatalogPhotos() {
+  for (const phone of groupDevices(connections, saved)) {
+    if (!profile(phone.model).photo || photoAttempts.has(phone.model)
+      || fs.existsSync(photoPath(photoKey(phone.model)))) continue;
+    photoAttempts.add(phone.model);
+    setPhoto(phone.key, true, true).catch(() => { /* The manual button can retry when the network returns. */ });
+  }
 }
 
 function snapshot() {
   return {
     phones: groupDevices(connections, saved).map((phone) => {
-      const modelProfile = profile(phone.model, phone.connections[0]?.manufacturer);
+      const modelProfile = profile(phone.model, phone.connections[0]?.manufacturer || phone.brand);
       const photo = photoKey(phone.model);
       return {
-        ...phone, brand: modelProfile.brand, catalogPhoto: Boolean(modelProfile.photo),
+        ...phone, brand: modelProfile.brand, brandLogo: logo(modelProfile.brand), catalogPhoto: Boolean(modelProfile.photo),
         photo: fs.existsSync(photoPath(photo)) ? '/photos/' + photo : '',
         connections: phone.connections.map(({ serial, photo: manufacturerImage, ...connection }) => connection),
       };
@@ -118,7 +154,7 @@ function snapshot() {
     sessions: [...sessions.values()].map(({ key, kind, clock, options, finalizing, meters = [], mirror }) => {
       const tracks = meters.map((meter) => meter.stats());
       return {
-        key, kind, clock, recording: Boolean(options.record), audio: options.audio, camera: options.camera, finalizing,
+        key, kind, clock, keepActive: !options.viewOnly && options.keepActive, recording: Boolean(options.record), audio: options.audio, camera: options.camera, finalizing,
         state: finalizing ? 'finishing' : !mirror ? 'opening' : 'running',
         micActive: tracks[options.audio === 'both' ? 1 : 0]?.live && ['mic', 'both'].includes(options.audio),
         cameraActive: tracks[0]?.live && Boolean(options.camera),
@@ -127,7 +163,7 @@ function snapshot() {
       };
     }),
     error: latestError, lastRecording: lastRecording ? path.basename(lastRecording) : '',
-    canMix: Boolean(localFFmpeg()), events,
+    canMix: Boolean(localFFmpeg()), events, controlLibrary, settings, platform: process.platform, otg: Boolean(otg),
   };
 }
 
@@ -170,15 +206,16 @@ async function discover() {
         let info = identityCache.get(device.transport);
         if (!info && device.state === 'device') {
           try {
-            const [serial, manufacturer, sdk, form] = (await adb(
-              ['-s', device.serial, 'shell', 'getprop ro.serialno; getprop ro.product.manufacturer; getprop ro.build.version.sdk; getprop ro.build.characteristics'],
+            const [serial, manufacturer, sdk, form, model] = (await adb(
+              ['-s', device.serial, 'shell', 'getprop ro.serialno; getprop ro.product.manufacturer; getprop ro.build.version.sdk; getprop ro.build.characteristics; getprop ro.product.model'],
               { timeout: 2_500 },
             )).split(/\r?\n/);
-            info = { ...identityFor(device, serial), manufacturer: manufacturer || '', sdk: Number(sdk) || 0, form };
+            info = { ...identityFor(device, serial), manufacturer: manufacturer || '', sdk: Number(sdk) || 0, form, model: model?.trim() || device.model };
             if (serial || sdk) identityCache.set(device.transport, info);
           } catch { /* A device can disconnect while it is being detected. */ }
         }
-        return { ...device, ...(info || identityFor(device)), ...profile(device.model, info?.manufacturer, info?.form), sdk: info?.sdk || 0 };
+        const model = info?.model || device.model;
+        return { ...device, ...(info || identityFor(device)), model, ...profile(model, info?.manufacturer, info?.form), sdk: info?.sdk || 0 };
       }));
       const liveLinks = new Map(groupDevices(connections, []).flatMap((phone) => phone.connections.map((connection) => [
         phone.key + '|' + connection.kind, { title: phone.title, kind: connection.kind, state: connection.state },
@@ -188,13 +225,17 @@ async function discover() {
         if (knownLinks.get(id)?.state !== link.state) log('Connection', link.title + ' · ' + transportName(link.kind) + ' · ' + link.state);
       }
       knownLinks = liveLinks;
+      for (const link of connections) {
+        if (link.kind === 'wifi' && link.state === 'device') knownWireless.set(link.key, link.serial);
+      }
+      loadCatalogPhotos();
       latestError = '';
       const usb = new Set(connections.filter((device) => device.kind === 'usb' && device.state === 'device').map((d) => d.key));
       for (const key of autoAttempts) if (!usb.has(key)) autoAttempts.delete(key);
       for (const phone of saved) {
         if (!phone.auto || !usb.has(phone.key) || autoAttempts.has(phone.key) || sessions.has(sessionID(phone.key, 'usb'))) continue;
         autoAttempts.add(phone.key);
-        startSession(phone.key, 'usb', { audio: 'off', size: 1440 }).catch((error) => sendNotice(error.message, 'error'));
+        startSession(phone.key, 'usb', { ...settings, audio: 'off' }).catch((error) => sendNotice(error.message, 'error'));
       }
     } catch (error) {
       if (latestError !== error.message) log('Error', 'Device detection failed. ' + error.message);
@@ -220,8 +261,74 @@ function requireDevice(key, kind) {
   return target;
 }
 
-function setting(args, key, kind) {
-  return adb(['-s', requireDevice(key, kind).serial, 'shell', ...args]);
+function adbTarget(target) {
+  return /^\d+$/.test(target.transport) ? ['-t', target.transport] : ['-s', target.serial];
+}
+
+const shadeAction = new Set(['notifications', 'quickSettings']);
+
+async function shadeOpen(base) {
+  const windows = await adb([...base, 'dumpsys', 'window', 'windows', 'NotificationShade']);
+  const shade = /Window #\d+ Window\{[^\n}]+ NotificationShade\}:([\s\S]*?)(?=\n\s*Window #\d+ Window|$)/.exec(windows)?.[1];
+  const visible = /\bisVisible=(true|false)\b/.exec(shade || '')?.[1];
+  return visible === undefined ? null : visible === 'true';
+}
+
+async function deviceControlState(key, kind) {
+  const base = [...adbTarget(requireDevice(key, kind)), 'shell'];
+  const [audio, shade] = await Promise.all([
+    adb([...base, 'dumpsys audio | sed -n "/^- STREAM_MUSIC:/,+2p"']).catch(() => ''),
+    shadeOpen(base).catch(() => null),
+  ]);
+  const muted = /\bMuted:\s*(true|false)\b/.exec(audio)?.[1];
+  return { muted: muted === undefined ? null : muted === 'true', shade };
+}
+
+async function deviceControl(key, kind, action, wasOpen) {
+  if (!controls.has(action)) throw new Error('Unknown device control.');
+  if (!shadeAction.has(action)) return setting(controls.get(action), key, kind);
+  const base = [...adbTarget(requireDevice(key, kind)), 'shell'];
+  const open = await shadeOpen(base).catch(() => null);
+  const collapse = open ?? wasOpen === true;
+  await setting(collapse ? ['cmd', 'statusbar', 'collapse'] : controls.get(action), key, kind);
+  return { shade: !collapse };
+}
+
+async function quickTiles(key, kind) {
+  const text = await setting(['settings', 'get', 'secure', 'sysui_qs_tiles'], key, kind);
+  return [...new Set(text.split(',').map((tile) =>
+    /^custom\(([a-zA-Z0-9_.]+\/[a-zA-Z0-9_.$]+)\)$/.exec(tile.trim())?.[1]).filter(Boolean))];
+}
+
+async function clickQuickTile(key, kind, component) {
+  if (!(await quickTiles(key, kind)).includes(component)) throw new Error('That tile is no longer pinned on the phone.');
+  // The component is from the strict Quick Settings allowlist, with shell metacharacters quoted.
+  await setting(['cmd', 'statusbar', 'click-tile', "'" + component + "'"], key, kind);
+}
+
+async function virtualInput(key, kind, type, text) {
+  if (type === 'dial') {
+    if (typeof text !== 'string' || !/^[0-9*#+]{1,45}$/.test(text)) throw new Error('Enter a phone number or dial code.');
+    const number = encodeURIComponent(text).replaceAll('*', '%2A');
+    return setting(['am', 'start', '-a', 'android.intent.action.DIAL', '-d', 'tel:' + number], key, kind);
+  }
+  if (type !== 'text' || typeof text !== 'string' || !/^[ -~]{1,256}$/.test(text)) {
+    throw new Error('Enter up to 256 ASCII characters or use clipboard paste in the mirror for other scripts.');
+  }
+  // Android input converts %s to a space. Split a literal %s into separate injections.
+  const blocks = text.split(/(?<=%)\b(?=s)/);
+  for (const block of blocks) {
+    const literal = "'" + block.replaceAll(' ', '%s').replaceAll("'", "'\\''") + "'";
+    await setting(['input text ' + literal], key, kind);
+  }
+}
+
+async function setting(args, key, kind) {
+  const response = await adb([...adbTarget(requireDevice(key, kind)), 'shell', ...args]);
+  if (/(?:^|\n)\s*(?:Error\b|Exception\b|Unknown command|Security exception)/i.test(response)) {
+    throw new Error('Android does not expose this control on the selected phone.');
+  }
+  return response;
 }
 
 function childMirror(args) {
@@ -320,6 +427,19 @@ async function finishSession(session, result) {
   }
 }
 
+async function reconnectKnownWireless(key) {
+  const previous = knownWireless.get(key);
+  if (!previous) return;
+  if (previous.includes('._adb-tls-connect._tcp')) {
+    const name = previous.split('._adb-tls-connect._tcp')[0];
+    const services = await wirelessServices().catch(() => []);
+    const match = services.find((service) => service.name === name && service.kind === 'adb-tls-connect');
+    if (match) await connectWireless(match.address).catch(() => {});
+    return;
+  }
+  await connectWireless(previous).catch(() => {});
+}
+
 async function recoverSession(session) {
   if ((session.options.retryCount || 0) >= 3) return;
   const token = Symbol();
@@ -328,7 +448,13 @@ async function recoverSession(session) {
     await new Promise((resolve) => setTimeout(resolve, [650, 1_600, 3_200][attempt]));
     if (quitting || recoveries.get(session.id) !== token || sessions.has(session.id)) return;
     await discover();
-    const routes = groupDevices(connections, []).find((phone) => phone.key === session.key)?.connections || [];
+    let routes = groupDevices(connections, []).find((phone) => phone.key === session.key)?.connections || [];
+    if ((session.kind === 'wifi' || (session.kind === 'usb' && session.options.fallback))
+      && !routes.some((route) => route.state === 'device' && (route.kind === session.kind || route.kind === 'wifi'))) {
+      await reconnectKnownWireless(session.key);
+      if (quitting || recoveries.get(session.id) !== token || sessions.has(session.id)) return;
+      routes = groupDevices(connections, []).find((phone) => phone.key === session.key)?.connections || [];
+    }
     if (session.kind === 'usb' && session.options.fallback && sessions.has(sessionID(session.key, 'wifi'))) {
       log('Recovery', session.name + ' · existing Wi‑Fi mirror is still available');
       recoveries.delete(session.id);
@@ -366,6 +492,19 @@ async function startSession(key, kind, request) {
   const audioOnly = request.record === 'audio';
   const camera = !audioOnly && ['front', 'back'].includes(request.source) ? request.source : '';
   const recording = audioOnly || request.record === 'video';
+  const dimensions = typeof request.virtualDisplay === 'string' && /^(\d{3,4})x(\d{3,4})$/.exec(request.virtualDisplay);
+  const virtualDisplay = !audioOnly && !camera && dimensions
+    && dimensions.slice(1).every((dimension) => Number(dimension) >= 240 && Number(dimension) <= 4096) ? dimensions[0] : '';
+  if (request.virtualDisplay && !virtualDisplay) throw new Error('Use a virtual display size such as 720x1280 with the phone screen source.');
+  const flex = Boolean(virtualDisplay && request.flex === true);
+  if (flex && request.viewOnly) throw new Error('Use Mirror & Control for a flex display.');
+  const startApp = virtualDisplay && typeof request.startApp === 'string' ? request.startApp.trim() : '';
+  if (startApp && (!/^[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+$/.test(startApp) || request.viewOnly)) {
+    throw new Error('Enter an Android package name and use Mirror & Control to launch it on a virtual display.');
+  }
+  const webcam = process.platform === 'linux' && !audioOnly && !flex && typeof request.webcam === 'string'
+    && /^\/dev\/video\d{1,3}$/.test(request.webcam) ? request.webcam : '';
+  if (request.webcam && !webcam) throw new Error('Choose a Linux loopback device such as /dev/video2. Flex displays need a fixed-size source to use a webcam sink.');
   if (audioOnly && audio === 'off') throw new Error('Choose an audio source for an audio-only recording.');
   if (audio !== 'off' && target.sdk > 0 && target.sdk < 30) throw new Error('Audio forwarding needs Android 11 or later.');
   if (camera && target.sdk > 0 && target.sdk < 31) throw new Error('Camera mirroring needs Android 12 or later.');
@@ -375,9 +514,9 @@ async function startSession(key, kind, request) {
   const session = {
     key, id, kind, target, name, clock: Date.now(), stopping: false, finalizing: false, meters: [],
     options: {
-      audio, audioOnly, camera, size: request.size, keyboard: audioOnly || camera ? '' : request.keyboard,
+      ...normalizePreferences({ ...settings, ...request }),
+      audio, audioOnly, camera, virtualDisplay, flex, startApp, webcam,
       viewOnly: request.viewOnly === true || audioOnly || Boolean(camera),
-      retry: request.retry !== false, fallback: request.fallback !== false,
       retryCount: Number.isInteger(request.retryCount) ? Math.max(0, Math.min(request.retryCount, 3)) : 0,
     },
   };
@@ -458,24 +597,116 @@ async function deviceInfo(key, kind) {
   };
 }
 
-async function pair(address, code) {
-  const safeAddress = validateAddress(address);
-  if (typeof code !== 'string' || !/^\d{6}$/.test(code)) throw new Error('Enter the six digits shown on the phone.');
-  let result;
-  try { result = await adb(['pair', safeAddress], { input: code + '\n', timeout: 15_000 }); }
-  catch { throw new Error('Pairing failed. Keep the code dialog open and make sure both devices are on the same network.'); }
-  const guid = /\[guid=([^\]]+)\]/.exec(result)?.[1];
-  if (!/Successfully paired/i.test(result)) throw new Error('The phone rejected that pairing request.');
-  let endpoint;
-  for (let attempt = 0; guid && attempt < 6 && !endpoint; attempt++) {
-    const services = await adb(['mdns', 'services']).catch(() => '');
-    endpoint = services.split(/\r?\n/).map((line) => line.trim().split(/\s+/))
-      .find(([name, type]) => name === guid && type?.startsWith('_adb-tls-connect._tcp'))?.[2];
-    if (!endpoint) await new Promise((resolve) => setTimeout(resolve, 350));
-  }
-  if (endpoint) await adb(['connect', validateAddress(endpoint)]).catch(() => {});
+async function wirelessServices() {
+  return parseServices(await adb(['mdns', 'services'])).map((service) => ({
+    ...service,
+    connected: connections.some(({ serial, state }) => state === 'device'
+      && (serial === service.address || serial.startsWith(service.name + '._adb-tls-connect._tcp'))),
+  }));
+}
+
+async function connectWireless(address) {
+  const result = await adb(['connect', validateAddress(address)], { timeout: 12_000 });
+  if (!/^(already )?connected to\b/i.test(result)) throw new Error(result || 'Could not connect to the phone.');
   await discover();
-  if (!endpoint) sendNotice('Paired. If the phone does not appear, use Connect with the main Wireless debugging IP and port.');
+}
+
+async function pairWireless(address, secret) {
+  if (pairingPromise) throw new Error('A wireless pairing request is already running.');
+  pairingPromise = (async () => {
+    let result;
+    try { result = await adb(['pair', validateAddress(address)], { input: secret + '\n', timeout: 15_000 }); }
+    catch { throw new Error('Pairing failed. Keep the pairing screen open and check that both devices share a network.'); }
+    const guid = /\[guid=([^\]]+)\]/.exec(result)?.[1];
+    if (!/Successfully paired/i.test(result)) throw new Error('The phone rejected the pairing request.');
+    let addressForConnection;
+    for (let attempt = 0; guid && attempt < 5; attempt++) {
+      const services = await wirelessServices().catch(() => []);
+      const endpoint = services.find(({ name, kind }) => name === guid && kind === 'adb-tls-connect')?.address;
+      if (endpoint) {
+        addressForConnection = endpoint;
+        await connectWireless(endpoint).catch(() => {});
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    await discover();
+    return { connected: Boolean(guid && connections.some((link) => link.kind === 'wifi' && link.state === 'device'
+      && (link.serial === addressForConnection || link.serial.startsWith(guid + '._adb-tls-connect._tcp')))) };
+  })();
+  try { return await pairingPromise; }
+  finally { pairingPromise = undefined; }
+}
+
+async function pollPairingQR(payload) {
+  const { name, secret } = readAdbQR(payload);
+  const services = await wirelessServices();
+  const pairing = services.find((service) => service.kind === 'adb-tls-pairing' && service.name === name);
+  if (!pairing) return null;
+  return pairWireless(pairing.address, secret);
+}
+
+async function disconnectWireless(address) {
+  const endpoint = validateAddress(address);
+  const services = await wirelessServices();
+  const name = services.find((service) => service.address === endpoint && service.kind === 'adb-tls-connect')?.name;
+  const matches = connections.filter(({ serial, kind }) => kind === 'wifi'
+    && (serial === endpoint || (name && serial.startsWith(name + '._adb-tls-connect._tcp'))));
+  for (const target of matches) {
+    const session = sessions.get(sessionID(target.key, 'wifi'));
+    if (session) {
+      session.stopping = true;
+      session.mirror?.stop();
+    }
+    recoveries.delete(sessionID(target.key, 'wifi'));
+    knownWireless.delete(target.key);
+    await adb(['disconnect', target.serial]);
+  }
+  await discover();
+}
+
+async function runRecipe(key, kind, action) {
+  if (!Object.hasOwn(actions, action)) throw new Error('Choose an available ADB action.');
+  return setting([actions[action]], key, kind);
+}
+
+async function screenshot(key, kind) {
+  const target = requireDevice(key, kind);
+  const { canceled, filePath } = await dialog.showSaveDialog(window, {
+    title: 'Save Android screenshot', defaultPath: path.join(app.getPath('pictures'), 'OmniCast-screenshot.png'),
+    filters: [{ name: 'PNG image', extensions: ['png'] }],
+  });
+  if (canceled || !filePath) return false;
+  const { adb: executable, env } = getTools();
+  const bytes = await new Promise((resolve, reject) => {
+    execFile(executable, [...adbTarget(target), 'exec-out', 'screencap', '-p'],
+      { env, timeout: 8000, encoding: 'buffer', maxBuffer: 32 * 1024 * 1024, windowsHide: true },
+      (error, stdout) => error ? reject(error) : resolve(stdout));
+  });
+  if (bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') {
+    throw new Error('Android did not return a screenshot.');
+  }
+  await fs.promises.writeFile(filePath, bytes);
+  return true;
+}
+
+async function startOtg(key) {
+  if (otg) throw new Error('USB input mode is already running.');
+  const device = connections.find((link) => link.key === key && link.kind === 'usb');
+  const args = ['--otg', '--window-title=OmniCast USB input'];
+  if (device) args.push('--serial', device.serial);
+  if (settings.gamepad) args.push('--gamepad=aoa');
+  const child = childMirror(args);
+  otg = child;
+  child.done.then(({ code, output }) => {
+    if (otg !== child) return;
+    otg = undefined;
+    if (code !== 0) sendNotice(output.split(/\r?\n/).find((line) => line.includes('ERROR:')) ||
+      'USB input closed. Check USB permissions and close other apps using the phone.', 'error');
+    publish();
+  });
+  await child.started;
+  publish();
 }
 
 function handle(name, handler) {
@@ -490,9 +721,11 @@ function openWindow() {
   window = new BrowserWindow({
     width: 1030, height: 760, minWidth: 745, minHeight: 580, show: false,
     backgroundColor: '#10191e', title: 'OmniCast',
+    icon: path.join(__dirname, 'ui', 'omnicast.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
   window.removeMenu();
+  window.on('closed', () => terminal.close());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.once('ready-to-show', () => window.show());
@@ -506,7 +739,11 @@ if (!app.requestSingleInstanceLock()) {
     if (window && !window.isDestroyed()) { window.restore(); window.focus(); }
   });
   app.whenReady().then(() => {
+    if (app.dock) app.dock.setIcon(nativeImage.createFromPath(path.join(__dirname, 'ui', 'omnicast.png')));
     stateFile = path.join(app.getPath('userData'), 'devices.json');
+    settingsFile = path.join(app.getPath('userData'), 'settings.json');
+    try { settings = normalizePreferences(JSON.parse(fs.readFileSync(settingsFile, 'utf8')) || {}); }
+    catch { /* New installations use the default settings. */ }
     logFile = path.join(app.getPath('userData'), 'connection-log.json');
     try {
       const data = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
@@ -517,10 +754,24 @@ if (!app.requestSingleInstanceLock()) {
       const previous = JSON.parse(fs.readFileSync(logFile, 'utf8'));
       if (Array.isArray(previous)) events.push(...previous.slice(0, 100));
     } catch { /* A new install has no connection history. */ }
+    const cameraAllowed = (_contents, permission, origin, details) => permission === 'media'
+      && (origin === 'omnicast://app' || origin === 'omnicast://app/') && details.mediaType === 'video';
+    const { session } = require('electron');
+    session.defaultSession.setPermissionCheckHandler(cameraAllowed);
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+      callback(contents === window?.webContents && permission === 'media' && details.requestingUrl === page
+        && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'video');
+    });
     protocol.handle('omnicast', (request) => {
       const url = new URL(request.url);
       if (url.host === 'app') {
+        if (vendors.has(url.pathname)) return net.fetch(pathToFileURL(vendors.get(url.pathname)).href);
         if (assets.has(url.pathname)) return net.fetch(pathToFileURL(path.join(__dirname, 'ui', url.pathname.slice(1))).href);
+        const brandLogo = /^\/brands\/([a-z]+\.png)$/.exec(url.pathname)?.[1];
+        if (brandLogo) {
+          const file = path.join(__dirname, 'ui', 'brands', brandLogo);
+          if (fs.existsSync(file)) return net.fetch(pathToFileURL(file).href);
+        }
         const filename = /^\/photos\/([a-f0-9]{64}\.png)$/.exec(url.pathname)?.[1];
         if (filename && fs.existsSync(photoPath(filename))) {
           return new Response(fs.readFileSync(photoPath(filename)), { headers: { 'content-type': 'image/png', 'cache-control': 'no-store' } });
@@ -539,23 +790,44 @@ if (!app.requestSingleInstanceLock()) {
       session.mirror?.stop();
       session.mic?.stop();
     });
-    handle('control', (key, kind, action) => {
-      if (!controls.has(action)) throw new Error('Unknown device control.');
-      return setting(controls.get(action), key, kind);
-    });
+    handle('control', deviceControl);
+    handle('control-state', deviceControlState);
+    handle('virtual-input', virtualInput);
+    handle('quick-tiles', quickTiles);
+    handle('quick-tile-click', clickQuickTile);
     handle('info', deviceInfo);
-    handle('photo', setPhoto);
-    handle('pair', pair);
-    handle('connect', async (address) => {
-      const result = await adb(['connect', validateAddress(address)], { timeout: 12_000 });
-      if (!/^(already )?connected to\b/i.test(result)) throw new Error(result || 'Could not connect to the phone.');
-      await discover();
+    handle('photo', (key, useCatalog) => setPhoto(key, useCatalog));
+    handle('pair', (address, code) => {
+      if (typeof code !== 'string' || !/^\d{6}$/.test(code)) throw new Error('Enter the six digits shown on the phone.');
+      return pairWireless(address, code);
     });
+    handle('connect', connectWireless);
+    handle('disconnect', disconnectWireless);
+    handle('wireless-scan', wirelessServices);
+    handle('wireless-qr-new', () => qrCredentials().payload);
+    handle('wireless-qr-poll', pollPairingQR);
+    handle('settings', (options) => {
+      const updated = normalizePreferences(options || {});
+      fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+      fs.writeFileSync(settingsFile + '.tmp', JSON.stringify(updated, null, 2) + '\n', { mode: 0o600 });
+      fs.renameSync(settingsFile + '.tmp', settingsFile);
+      settings = updated;
+      publish();
+      return settings;
+    });
+    handle('otg', startOtg);
+    handle('otg-stop', () => otg?.stop());
+    handle('terminal-start', (key, kind) => terminal.start(requireDevice(key, kind)));
+    handle('terminal-input', terminal.input);
+    handle('terminal-stop', terminal.close);
+    handle('adb-help', () => adb(['help']));
+    handle('adb-recipe', runRecipe);
+    handle('adb-screenshot', screenshot);
     handle('save', (key, name, auto) => {
       const phone = groupDevices(connections, saved).find((d) => d.key === key && d.canSave);
       if (!phone || typeof name !== 'string' || !name.trim() || name.trim().length > 48) throw new Error('Choose a phone and enter a name up to 48 characters.');
       writeSaved([...saved.filter((d) => d.key !== key), {
-        key, model: phone.model, title: phone.title, style: phone.style, name: name.trim(), auto: auto === true,
+        key, model: phone.model, title: phone.title, style: phone.style, brand: profile(phone.model, phone.connections[0]?.manufacturer || phone.brand).brand, name: name.trim(), auto: auto === true,
         addedAt: phone.addedAt || Date.now(),
         lastUsedAt: phone.lastUsedAt || [...sessions.values()].find((session) => session.key === key)?.clock || null,
       }]);
@@ -574,6 +846,8 @@ if (!app.requestSingleInstanceLock()) {
     app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) openWindow(); });
     app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
     app.on('before-quit', (event) => {
+      terminal.close();
+      otg?.stop();
       if (quitting || !sessions.size) return;
       event.preventDefault();
       quitting = true;

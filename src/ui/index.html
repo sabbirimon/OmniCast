@@ -3,20 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' blob:; media-src 'self' blob:; base-uri 'none'; form-action 'none'">
   <title>OmniCast</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="xterm.css">
+  <link rel="icon" href="omnicast.png">
+  <script src="xterm.js" defer></script>
+  <script src="fit.js" defer></script>
+  <script src="jsqr.js" defer></script>
+  <script src="qrcode.js" defer></script>
   <script src="renderer.js" defer></script>
+  <script src="adb-help.js" defer></script>
+  <script src="adb-tools.js" defer></script>
+  <script src="wireless-ui.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">◫</span><span>OmniCast</span></div>
+    <div class="brand"><img class="brand-mark" src="omnicast.png" alt=""><span>OmniCast</span></div>
     <nav aria-label="Main navigation" class="tabs">
       <button type="button" class="tab" data-page="devices" aria-current="page">Devices</button>
+      <button type="button" class="tab" data-page="adb-tools">ADB tools</button>
       <button type="button" class="tab" data-page="logs">Logs</button>
       <button type="button" class="tab" data-page="setup">Setup guide</button>
+      <button type="button" class="tab" data-page="settings">Settings</button>
     </nav>
-    <button type="button" class="button secondary top-action" id="wireless">＋ Wireless connection</button>
+    <button type="button" class="button secondary top-action" id="wireless">Wireless manager</button>
   </header>
 
   <main id="devices" class="page">
@@ -26,6 +37,10 @@
         <button type="button" class="icon-button" id="refresh" title="Refresh devices" aria-label="Refresh devices">↻</button>
       </div>
       <div id="device-list"></div>
+      <section id="active-mirrors" class="active-mirrors" aria-label="Active sessions" hidden>
+        <h2>Active sessions</h2>
+        <div id="active-mirror-list"></div>
+      </section>
       <button type="button" class="link sidebar-guide" data-page="setup">How to connect a phone <span aria-hidden="true">↗</span></button>
     </section>
     <section class="device-detail" id="device-detail" aria-label="Selected device"></section>
@@ -41,36 +56,126 @@
     <section class="guide-card">
       <h2>Enable Developer options</h2>
       <div class="steps">
-        <article><span class="step-number">1</span><h3>Open About phone</h3><p>Go to <strong>Settings → About phone</strong>. On Samsung, also open <strong>Software information</strong>.</p></article>
-        <article><span class="step-number">2</span><h3>Tap seven times</h3><p>Tap <strong>Build number</strong> seven times. Enter the phone PIN if Android asks.</p></article>
-        <article><span class="step-number">3</span><h3>Open Developer options</h3><p>Go to <strong>Settings → System → Developer options</strong>. Some phones list it directly in Settings.</p></article>
+        <article><span class="step-number">1</span><div class="guide-phone" aria-hidden="true"><b>Settings</b><span>Network &amp; internet</span><span>Apps</span><span class="illustration-focus">About phone ›</span></div><h3>Open About phone</h3><p>Go to <strong>Settings → About phone</strong>. On Samsung, also open <strong>Software information</strong>.</p></article>
+        <article><span class="step-number">2</span><div class="guide-phone" aria-hidden="true"><b>About phone</b><span>Android version</span><span class="illustration-focus">Build number <em>Tap × 7</em></span><span>Enter PIN if asked</span></div><h3>Tap seven times</h3><p>Tap <strong>Build number</strong> seven times. Enter the phone PIN if Android asks.</p></article>
+        <article><span class="step-number">3</span><div class="guide-phone" aria-hidden="true"><b>System</b><span>Languages</span><span>Gestures</span><span class="illustration-focus">Developer options ›</span></div><h3>Open Developer options</h3><p>Go to <strong>Settings → System → Developer options</strong>. Some phones list it directly in Settings.</p></article>
       </div>
     </section>
     <div class="guide-grid">
       <section class="guide-card">
         <h2>Connect with USB</h2>
+        <div class="guide-phone guide-wide" aria-hidden="true"><b>Developer options</b><span class="illustration-focus">USB debugging <em>● On</em></span><span class="illustration-dialog">Allow USB debugging? <em>Allow</em></span></div>
         <ol><li>Turn on <strong>USB debugging</strong> in Developer options.</li><li>Connect the phone to this computer with a USB data cable.</li><li>Unlock the phone and tap <strong>Allow USB debugging</strong>.</li><li>In OmniCast, select the phone and click <strong>Mirror &amp; Control</strong>.</li></ol>
         <p>If a Windows PC needs a driver, use your phone maker’s USB driver. On Linux, make sure your user has USB access through the Android udev rules.</p>
       </section>
       <section class="guide-card">
         <h2>Pair over Wi‑Fi</h2>
-        <ol><li>Put the phone and computer on the same local network.</li><li>On Android 11 or later, open <strong>Developer options → Wireless debugging</strong>.</li><li>Tap <strong>Pair device with pairing code</strong> and leave that screen open.</li><li>In OmniCast, open <strong>Wireless connection</strong> and enter the pairing address and six digits.</li></ol>
+        <div class="guide-phone guide-wide" aria-hidden="true"><b>Wireless debugging</b><span class="illustration-focus">Pair device with pairing code ›</span><span class="illustration-dialog">192.168.1.20:37001 <em>123456</em></span></div>
+        <ol><li>Put the phone and computer on the same local network.</li><li>On Android 11 or later, open <strong>Developer options → Wireless debugging</strong>.</li><li>Tap <strong>Pair device with pairing code</strong> and leave that screen open.</li><li>In OmniCast, open <strong>Wireless manager</strong> and enter the pairing address and six digits. For QR pairing, show an OmniCast QR code and scan it on the phone.</li></ol>
         <p>If pairing succeeds and the phone does not appear, use <strong>Connect</strong> with the other address on the main Wireless debugging screen.</p>
       </section>
     </div>
   </main>
 
+  <main id="settings" class="page subpage" hidden>
+    <div class="page-intro"><h1>Settings</h1><p>Defaults apply the next time a mirror opens.</p></div>
+    <form id="settings-form" class="settings-grid"></form>
+  </main>
+
+  <main id="adb-tools" class="page subpage" hidden>
+    <div class="page-intro"><h1>Android tools</h1><p id="adb-target">Select an authorized Android connection to open its shell.</p></div>
+    <section class="guide-card terminal-card">
+      <div class="card-head">
+        <h2>Device terminal</h2>
+        <div class="action-row">
+          <button type="button" id="terminal-open" class="button primary">Open shell</button>
+          <button type="button" id="terminal-close" class="button secondary" disabled>Close shell</button>
+        </div>
+      </div>
+      <div id="terminal" aria-label="Android shell terminal"></div>
+      <p id="terminal-status" role="status">Open an interactive shell on the selected phone. Use Ctrl+C to interrupt or type exit to close.</p>
+    </section>
+    <section class="guide-card adb-actions">
+      <h2>Recovery and diagnostics</h2>
+      <div class="action-row">
+        <button type="button" class="button secondary" data-recipe="wake">Wake screen</button>
+        <button type="button" class="button secondary" data-recipe="home">Wake and go Home</button>
+        <button type="button" class="button secondary" data-recipe="diagnostics">Device diagnostics</button>
+        <button type="button" class="button secondary" data-recipe="files">List common folders</button>
+        <button type="button" class="button secondary" data-recipe="logs">Recent Android logs</button>
+        <button type="button" class="button secondary" data-recipe="screenshot">Save screenshot</button>
+      </div>
+      <p>These actions use the selected, authorized USB or Wi‑Fi connection. Wake shows the lock screen if Android is locked.</p>
+      <pre id="recipe-result" class="command-output" tabindex="0" hidden></pre>
+    </section>
+    <section class="guide-card adb-help" id="adb-help">
+      <h2>ADB command reference</h2>
+      <p>Commands starting with <code>adb</code> run in your computer terminal. In Device terminal, type the command after <code>adb shell</code>.</p>
+      <label class="search-label">Search commands <input id="adb-search" type="search" placeholder="Try logcat, files, Wi-Fi, or battery"></label>
+      <div id="adb-commands" class="command-list"></div>
+      <details><summary>Complete ADB help for this installation</summary><pre id="adb-raw-help" class="command-output" tabindex="0"></pre></details>
+    </section>
+  </main>
+
+  <nav id="android-nav" aria-label="Android navigation" hidden>
+    <button type="button" data-key="back" title="Android Back" aria-label="Android Back"><span class="nav-back" aria-hidden="true"></span></button>
+    <button type="button" data-key="home" title="Android Home" aria-label="Android Home"><span class="nav-home" aria-hidden="true"></span></button>
+    <button type="button" data-key="recents" title="Android Recents" aria-label="Android Recents"><span class="nav-recents" aria-hidden="true"></span></button>
+  </nav>
   <footer><span id="footer-status">Detecting Android devices…</span><button type="button" class="link" id="recording" hidden>Show latest recording</button></footer>
   <div id="notice" class="notice" role="status" hidden></div>
 
-  <dialog id="wireless-dialog">
-    <form id="wireless-form">
-      <div class="dialog-heading"><h2>Wireless connection</h2><button type="button" class="icon-button" data-close="wireless-dialog" aria-label="Close">×</button></div>
-      <label>Connection method <select id="wifi-method"><option value="pair">Pair with a code</option><option value="connect">Connect to an already paired phone</option></select></label>
-      <p id="wifi-instructions">On the phone, open Developer options → Wireless debugging → Pair device with pairing code.</p>
-      <label>IP address and port <input id="wifi-address" placeholder="192.168.1.20:37001" autocomplete="off" required></label>
-      <label id="code-label">Six-digit code <input id="wifi-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required></label>
-      <div class="dialog-actions"><button type="button" class="button secondary" data-close="wireless-dialog">Cancel</button><button type="submit" class="button primary" id="wifi-submit">Pair phone</button></div>
+  <dialog id="wireless-dialog" class="wide-dialog" aria-labelledby="wireless-title">
+    <div class="dialog-heading"><h2 id="wireless-title">Wireless debugging manager</h2><button type="button" class="icon-button" data-close="wireless-dialog" aria-label="Close">×</button></div>
+    <p>Use Android 11 or later on the same local network.</p>
+    <div class="wireless-grid">
+      <section class="guide-card">
+        <div class="card-head"><h3>Nearby ADB services</h3><button type="button" id="wifi-scan" class="link">Scan again</button></div>
+        <div id="wifi-services"></div>
+      </section>
+      <section class="guide-card">
+        <form id="wireless-form">
+          <label>Connection method <select id="wifi-method"><option value="pair">Pair with a code</option><option value="connect">Connect to an already paired phone</option></select></label>
+          <p id="wifi-instructions">On the phone, open Developer options → Wireless debugging → Pair device with pairing code.</p>
+          <label>IP address and port <input id="wifi-address" placeholder="192.168.1.20:37001" autocomplete="off" required></label>
+          <label id="code-label">Six-digit code <input id="wifi-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required></label>
+          <div class="dialog-actions"><button type="submit" class="button primary" id="wifi-submit">Pair phone</button></div>
+        </form>
+      </section>
+      <section class="guide-card qr-card">
+        <h3>QR pairing</h3>
+        <p>Generate a code and scan it from Wireless debugging on your phone. To reuse an active debugging QR, scan it with your computer camera or upload its image.</p>
+        <div class="action-row">
+          <button type="button" class="button secondary" id="qr-create">Show pairing QR</button>
+          <button type="button" class="button secondary" id="qr-camera">Scan with camera</button>
+          <button type="button" class="button secondary" id="qr-upload">Upload QR image</button>
+          <button type="button" class="link" id="qr-stop" hidden>Cancel QR</button>
+          <input type="file" id="qr-file" accept="image/png,image/jpeg,image/webp" hidden>
+        </div>
+        <canvas id="qr-display" aria-label="Android wireless pairing QR code" role="img" hidden></canvas>
+        <video id="qr-video" aria-label="QR camera preview" playsinline muted hidden></video>
+      </section>
+    </div>
+    <p id="wifi-status" role="status"></p>
+  </dialog>
+
+  <dialog id="controls-dialog" class="wide-dialog" aria-labelledby="controls-title">
+    <form id="controls-form">
+      <div class="dialog-heading"><h2 id="controls-title">Customize phone controls</h2><button type="button" class="icon-button" data-close="controls-dialog" aria-label="Close">×</button></div>
+      <p>Choose which buttons appear for this phone. Android and installed apps determine which actions are available.</p>
+      <div class="action-row"><button type="button" class="link" id="controls-all">Select all</button><button type="button" class="link" id="controls-default">Restore defaults</button><button type="button" class="link" id="controls-clear">Clear selection</button></div>
+      <div id="controls-library" class="controls-library"></div>
+      <div class="dialog-actions"><button type="submit" class="button primary">Save controls</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="virtual-dialog" class="wide-dialog" aria-labelledby="virtual-title">
+    <form id="virtual-form">
+      <div class="dialog-heading"><h2 id="virtual-title">Virtual input</h2><button type="button" class="icon-button" data-close="virtual-dialog" aria-label="Close">×</button></div>
+      <p id="virtual-hint"></p>
+      <label id="virtual-field-label">Text <input id="virtual-field" autocomplete="off" required maxlength="256"></label>
+      <div id="virtual-keys"></div>
+      <div class="dialog-actions"><button id="virtual-submit" type="submit" class="button primary">Send text</button></div>
     </form>
   </dialog>
 
