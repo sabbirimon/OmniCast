@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>OmniCast</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="renderer.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">◫</span><span>OmniCast</span></div>
+    <nav aria-label="Main navigation" class="tabs">
+      <button type="button" class="tab" data-page="devices" aria-current="page">Devices</button>
+      <button type="button" class="tab" data-page="logs">Logs</button>
+      <button type="button" class="tab" data-page="setup">Setup guide</button>
+    </nav>
+    <button type="button" class="button secondary top-action" id="wireless">＋ Wireless connection</button>
+  </header>
+
+  <main id="devices" class="page">
+    <section class="device-sidebar" aria-label="Devices">
+      <div class="sidebar-head">
+        <div><h1>Your devices</h1><p id="device-summary">Looking for devices…</p></div>
+        <button type="button" class="icon-button" id="refresh" title="Refresh devices" aria-label="Refresh devices">↻</button>
+      </div>
+      <div id="device-list"></div>
+      <button type="button" class="link sidebar-guide" data-page="setup">How to connect a phone <span aria-hidden="true">↗</span></button>
+    </section>
+    <section class="device-detail" id="device-detail" aria-label="Selected device"></section>
+  </main>
+
+  <main id="logs" class="page subpage" hidden>
+    <div class="page-intro"><h1>Connection logs</h1><p>USB, Wi‑Fi, and mirror events from this computer.</p></div>
+    <div id="log-list" class="log-list"></div>
+  </main>
+
+  <main id="setup" class="page subpage" hidden>
+    <div class="page-intro"><h1>Connect your Android</h1><p>Use a USB data cable or pair over the local network. An internet connection is optional.</p></div>
+    <section class="guide-card">
+      <h2>Enable Developer options</h2>
+      <div class="steps">
+        <article><span class="step-number">1</span><h3>Open About phone</h3><p>Go to <strong>Settings → About phone</strong>. On Samsung, also open <strong>Software information</strong>.</p></article>
+        <article><span class="step-number">2</span><h3>Tap seven times</h3><p>Tap <strong>Build number</strong> seven times. Enter the phone PIN if Android asks.</p></article>
+        <article><span class="step-number">3</span><h3>Open Developer options</h3><p>Go to <strong>Settings → System → Developer options</strong>. Some phones list it directly in Settings.</p></article>
+      </div>
+    </section>
+    <div class="guide-grid">
+      <section class="guide-card">
+        <h2>Connect with USB</h2>
+        <ol><li>Turn on <strong>USB debugging</strong> in Developer options.</li><li>Connect the phone to this computer with a USB data cable.</li><li>Unlock the phone and tap <strong>Allow USB debugging</strong>.</li><li>In OmniCast, select the phone and click <strong>Mirror &amp; Control</strong>.</li></ol>
+        <p>If a Windows PC needs a driver, use your phone maker’s USB driver. On Linux, make sure your user has USB access through the Android udev rules.</p>
+      </section>
+      <section class="guide-card">
+        <h2>Pair over Wi‑Fi</h2>
+        <ol><li>Put the phone and computer on the same local network.</li><li>On Android 11 or later, open <strong>Developer options → Wireless debugging</strong>.</li><li>Tap <strong>Pair device with pairing code</strong> and leave that screen open.</li><li>In OmniCast, open <strong>Wireless connection</strong> and enter the pairing address and six digits.</li></ol>
+        <p>If pairing succeeds and the phone does not appear, use <strong>Connect</strong> with the other address on the main Wireless debugging screen.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer><span id="footer-status">Detecting Android devices…</span><button type="button" class="link" id="recording" hidden>Show latest recording</button></footer>
+  <div id="notice" class="notice" role="status" hidden></div>
+
+  <dialog id="wireless-dialog">
+    <form id="wireless-form">
+      <div class="dialog-heading"><h2>Wireless connection</h2><button type="button" class="icon-button" data-close="wireless-dialog" aria-label="Close">×</button></div>
+      <label>Connection method <select id="wifi-method"><option value="pair">Pair with a code</option><option value="connect">Connect to an already paired phone</option></select></label>
+      <p id="wifi-instructions">On the phone, open Developer options → Wireless debugging → Pair device with pairing code.</p>
+      <label>IP address and port <input id="wifi-address" placeholder="192.168.1.20:37001" autocomplete="off" required></label>
+      <label id="code-label">Six-digit code <input id="wifi-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required></label>
+      <div class="dialog-actions"><button type="button" class="button secondary" data-close="wireless-dialog">Cancel</button><button type="submit" class="button primary" id="wifi-submit">Pair phone</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="save-dialog">
+    <form id="save-form">
+      <div class="dialog-heading"><h2>Save device</h2><button type="button" class="icon-button" data-close="save-dialog" aria-label="Close">×</button></div>
+      <label>Device name <input id="save-name" maxlength="48" required></label>
+      <label class="checkbox"><input id="save-auto" type="checkbox"> Mirror automatically when connected by USB</label>
+      <p>Automatic mirroring starts muted. Android still decides whether a debugging connection is authorized.</p>
+      <div class="dialog-actions"><button type="button" class="button secondary" data-close="save-dialog">Cancel</button><button type="submit" class="button primary">Save device</button></div>
+    </form>
+  </dialog>
+</body>
+</html>
