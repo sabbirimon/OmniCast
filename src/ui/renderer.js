@@ -563,6 +563,9 @@ document.addEventListener('click', async (event) => {
   if (button.dataset.key && route) {
     const previous = controlStates.get(phone.key) || {};
     const result = await invoke(window.omni.control(phone.key, route.kind, button.dataset.key, previous.shade));
+    if (result?.result?.muted !== undefined) {
+      controlStates.set(phone.key, { ...controlStates.get(phone.key), muted: result.result.muted });
+    }
     if (result?.result?.shade !== undefined) {
       controlStates.set(phone.key, { ...controlStates.get(phone.key), shade: result.result.shade, shadeChangedAt: Date.now() });
     }

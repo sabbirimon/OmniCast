@@ -1,7 +1,7 @@
 {
   "name": "omnicast",
   "productName": "OmniCast",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Mirror and control Android devices on your desktop.",
   "main": "src/main.cjs",

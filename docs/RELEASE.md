@@ -1,4 +1,4 @@
-# OmniCast 2.1.0 Preview
+# OmniCast 2.1.1 Preview
 
 - **Desktop builds** for Intel macOS, Windows x64, and Linux x64. Extract the full archive, then open OmniCast. The builds include Android Debug Bridge and official scrcpy 5.0.1.
 - **Mobile build** for ARM Android 8+. The debug APK is an Android controller for USB OTG and wireless pairing. It uses its own matched scrcpy client and server.

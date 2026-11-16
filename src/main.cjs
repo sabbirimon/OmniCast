@@ -265,29 +265,55 @@ function adbTarget(target) {
   return /^\d+$/.test(target.transport) ? ['-t', target.transport] : ['-s', target.serial];
 }
 
+const mediaRestore = new Map();
 const shadeAction = new Set(['notifications', 'quickSettings']);
 
 async function shadeOpen(base) {
-  const windows = await adb([...base, 'dumpsys', 'window', 'windows', 'NotificationShade']);
+  const windows = await adb([...base, 'dumpsys window windows NotificationShade; dumpsys window policy | grep showingAndNotOccluded=']);
+  if (/showingAndNotOccluded=true/.test(windows)) return null;
   const shade = /Window #\d+ Window\{[^\n}]+ NotificationShade\}:([\s\S]*?)(?=\n\s*Window #\d+ Window|$)/.exec(windows)?.[1];
   const visible = /\bisVisible=(true|false)\b/.exec(shade || '')?.[1];
   return visible === undefined ? null : visible === 'true';
 }
 
+async function readMediaState(base) {
+  const audio = await adb([...base, 'dumpsys audio | sed -n "/^- STREAM_MUSIC:/,+6p"']);
+  const mute = /\bMuted:\s*(true|false)\b/.exec(audio)?.[1];
+  const volume = Number(/\bstreamVolume:\s*(\d+)/.exec(audio)?.[1]);
+  const max = Number(/\bMax:\s*(\d+)/.exec(audio)?.[1]);
+  const muted = mute === 'true' || volume === 0 ? true : mute === 'false' || volume > 0 ? false : null;
+  return { muted, volume, max };
+}
+
 async function deviceControlState(key, kind) {
   const base = [...adbTarget(requireDevice(key, kind)), 'shell'];
-  const [audio, shade] = await Promise.all([
-    adb([...base, 'dumpsys audio | sed -n "/^- STREAM_MUSIC:/,+2p"']).catch(() => ''),
-    shadeOpen(base).catch(() => null),
-  ]);
-  const muted = /\bMuted:\s*(true|false)\b/.exec(audio)?.[1];
-  return { muted: muted === undefined ? null : muted === 'true', shade };
+  const [audio, shade] = await Promise.all([readMediaState(base).catch(() => null), shadeOpen(base).catch(() => null)]);
+  return { muted: audio?.muted ?? null, shade };
+}
+
+async function toggleMediaMute(key, kind, base) {
+  const current = await readMediaState(base).catch(() => null);
+  if (current && Number.isFinite(current.volume)) {
+    if (current.volume > 0) mediaRestore.set(key, current.volume);
+    const previous = mediaRestore.get(key) || 5;
+    const restored = Math.min(previous, Number.isFinite(current.max) && current.max > 0 ? current.max : previous);
+    const index = current.muted ? restored : 0;
+    try {
+      await setting(['cmd', 'media_session', 'volume', '--stream', '3', '--set', String(index)], key, kind);
+      const next = await readMediaState(base);
+      if (next.muted !== current.muted) return { muted: next.muted };
+    } catch { /* Older OEMs may only implement the hardware mute key. */ }
+  }
+  await setting(controls.get('mute'), key, kind);
+  const after = await readMediaState(base).catch(() => null);
+  return { muted: after?.muted ?? null };
 }
 
 async function deviceControl(key, kind, action, wasOpen) {
   if (!controls.has(action)) throw new Error('Unknown device control.');
-  if (!shadeAction.has(action)) return setting(controls.get(action), key, kind);
+  if (!shadeAction.has(action) && action !== 'mute') return setting(controls.get(action), key, kind);
   const base = [...adbTarget(requireDevice(key, kind)), 'shell'];
+  if (action === 'mute') return toggleMediaMute(key, kind, base);
   const open = await shadeOpen(base).catch(() => null);
   const collapse = open ?? wasOpen === true;
   await setting(collapse ? ['cmd', 'statusbar', 'collapse'] : controls.get(action), key, kind);

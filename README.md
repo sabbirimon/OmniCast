@@ -8,12 +8,12 @@ Mirror, control, and record Android devices over USB or local Wi-Fi on Windows, 
 
 | Platform | Package |
 | --- | --- |
-| Windows x64 | [OmniCast for Windows](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.0/OmniCast-Windows-x64.zip) |
-| Intel macOS | [OmniCast for macOS](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.0/OmniCast-macOS-Intel.zip) |
-| Linux x64 | [OmniCast for Linux](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.0/OmniCast-Linux-x64.tar.gz) |
-| Android 8+ ARM | [OmniCast Mobile preview APK](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.0/OmniCast-Mobile-debug.apk) |
+| Windows x64 | [OmniCast for Windows](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.1/OmniCast-Windows-x64.zip) |
+| Intel macOS | [OmniCast for macOS](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.1/OmniCast-macOS-Intel.zip) |
+| Linux x64 | [OmniCast for Linux](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.1/OmniCast-Linux-x64.tar.gz) |
+| Android 8+ ARM | [OmniCast Mobile preview APK](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.1/OmniCast-Mobile-debug.apk) |
 
-Extract the whole desktop archive. The macOS build is locally signed and the APK is debug signed. [Checksums](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.0/SHA256SUMS.txt)
+Extract the whole desktop archive. The macOS build is locally signed and the APK is debug signed. [Checksums](https://github.com/sabbirimon/OmniCast/releases/download/v2.1.1/SHA256SUMS.txt)
 
 ## Get connected
 

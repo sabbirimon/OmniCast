@@ -18,3 +18,5 @@
 - Platform and device validation still needed includes Windows and Linux runtime, a phone-to-phone APK session, Linux webcam output, camera QR pairing to a second device, and sustained gaming performance.
 
 - The Galaxy A20s was recognized from its exact Android model property. A real USB screen mirror returned measured traffic, showed the keep-awake badge, and appeared in Active sessions. The Mac decoder reported VideoToolbox with its Metal renderer.
+
+- Galaxy A20s media mute reached zero, highlighted the control, and restored the prior level on the second click. The notification control correctly alternated its command and button state on the locked phone. Android lock-screen policy governs the actual shade.
